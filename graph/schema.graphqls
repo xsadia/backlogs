@@ -1,0 +1,56 @@
+# GraphQL schema example
+#
+# https://gqlgen.com/getting-started/
+
+enum BacklogType {
+  GAMES
+  BOOKS
+  MOVIES
+  SERIES
+  OTHER
+}
+
+enum CompletionState {
+  DROPPED
+  COMPLETED
+  IN_PROGRESS
+  NOT_STARTED
+}
+
+type Backlog {
+  id: ID!
+  user: User!
+  description: String
+  backlogType: BacklogType!
+}
+
+type Item {
+  id: ID!
+  backlog: Backlog!
+  avgTimeToComplete: Int
+  completionState: CompletionState!
+  review: String
+  rate: Float
+}
+
+type User {
+  id: ID!
+  email: String!
+  username: String!
+  password: String!
+  bio: String
+}
+
+type Query {
+  me: User
+  backlogs: [Backlog!]!
+}
+
+input CreateBacklogInput {
+  description: String
+  backlogType: BacklogType!
+}
+
+type Mutation {
+  createBacklog(input: CreateBacklogInput!): Backlog!
+}
