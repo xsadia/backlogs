@@ -2,26 +2,28 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"strconv"
-	"time"
 
-	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/99designs/gqlgen/graphql/playground"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	"github.com/xsadia/backlogs-server/graph"
+	"github.com/xsadia/backlogs-server/pkg/config"
+	"github.com/xsadia/backlogs-server/pkg/handler"
 )
 
 const defaultPort = "8080"
-const (
-	defaultMaxIdleConns = 5
-	defaultMaxOpenConns = 10
-	defaultMaxLifetime  = 5
-)
+
+func failOnError(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
 
 func main() {
 	godotenv.Load()
@@ -41,38 +43,28 @@ func main() {
 		)
 
 	db, err := sql.Open("postgres", connectionString)
-	if err != nil {
-		log.Fatal(err)
-	}
+	failOnError(err)
 	defer db.Close()
 
-	maxIdleConns, err := strconv.Atoi(os.Getenv("POSTGRES_MAX_IDLE_CONNS"))
-	if err != nil {
-		maxIdleConns = defaultMaxIdleConns
-	}
+	config.ConfigDB(db)
+	failOnError(db.Ping())
 
-	maxOpenConns, err := strconv.Atoi(os.Getenv("POSTGRES_MAX_OPEN_CONNS"))
-	if err != nil {
-		maxOpenConns = defaultMaxOpenConns
-	}
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	failOnError(err)
 
-	maxLifetime, err := strconv.Atoi(os.Getenv("POSTGRES_MAX_LIFETIME"))
-	if err != nil {
-		maxLifetime = defaultMaxLifetime
-	}
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"postgres", driver)
+	failOnError(err)
 
-	db.SetMaxIdleConns(maxIdleConns)
-	db.SetMaxOpenConns(maxOpenConns)
-	db.SetConnMaxLifetime(time.Second * time.Duration(maxLifetime))
-
-	if err := db.Ping(); err != nil {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		log.Fatal(err)
 	}
 
-	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{DB: db}}))
-	http.Handle("/", playground.Handler("GraphQL playground", "/query"))
-	http.Handle("/query", srv)
+	r := gin.Default()
+	r.POST("/graphql", handler.GraphQLHandler(db))
+	r.GET("/", handler.PlaygroundHandler())
 
-	log.Printf("connect to http://localhost:%s/ for GraphQL playground", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("connect to http://localhost:%s for GraphQL playground", port)
+	log.Fatal(r.Run())
 }
